@@ -46,16 +46,6 @@ int num_builtins() {
   return sizeof(builtin_str) / sizeof(char *);
 }
 
-int main(int argc, char **argv) {
-    // Load config files, if any.
-
-    // Run command loop.
-    loop();
-
-    // Perform any shutdown/cleanup.
-
-    return EXIT_SUCCESS;
-}
 
 void loop(void) {
     char *line;
@@ -125,29 +115,6 @@ int execute(char **args) {
     return launch(args);
 }
 
-int launch(char **args) {
-    pid_t pid, wpid;
-    int status;
-
-    pid = fork();
-    if (pid == 0) {
-        // Child process
-        if (execvp(args[0], args) == -1) {
-            perror("mysh");
-        }
-        exit(EXIT_FAILURE);
-    } else if (pid < 0) {
-        // Error forking
-        perror("mysh");
-    } else {
-        // Parent process
-        do {
-            wpid = waitpid(pid, &status, WUNTRACED);
-        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-    }
-
-    return 1;
-}
 
 int cd(char **args) {
     if (args[1] == NULL) {
