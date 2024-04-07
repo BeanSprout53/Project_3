@@ -199,23 +199,27 @@ int main(int argc, char **argv) {
     return EXIT_SUCCESS;
 }
 
-// Function to expand wildcards; integrate this into your command processing.
 void expand_wildcards(char ***args) {
     glob_t glob_result;
-    memset(&glob_result, 0, sizeof(glob_result));
-
     for (int i = 0; (*args)[i] != NULL; i++) {
         if (strchr((*args)[i], '*') != NULL) { // Check if argument contains a wildcard
-            glob((*args)[i], GLOB_TILDE, NULL, &glob_result);
-            // Replace the wildcard argument with the list of matching files
-            for (unsigned j = 0; j < glob_result.gl_pathc; j++) {
-                // Note: reallocate (*args) and insert all matches
-                printf("Wildcard match: %s\n", glob_result.gl_pathv[j]); // For demonstration
+            if (glob((*args)[i], GLOB_TILDE | GLOB_NOCHECK, NULL, &glob_result) == 0) {
+                // Successfully found matches
+                // First, remove the wildcard argument
+                free((*args)[i]);
+                // Make space for the new arguments
+                *args = realloc(*args, sizeof(char *) * (glob_result.gl_pathc + 1));
+                for (unsigned j = 0; j < glob_result.gl_pathc; j++) {
+                    (*args)[i + j] = strdup(glob_result.gl_pathv[j]);
+                }
+                // Null-terminate the list of arguments
+                (*args)[i + glob_result.gl_pathc] = NULL;
             }
             globfree(&glob_result);
         }
     }
 }
+
 #include <fcntl.h> // For file control options
 
 // This function sets up redirection in the shell.
@@ -272,31 +276,65 @@ int setup_redirection(char **args) {
 
     return 0; // Indicate success
 }
-int launch(char **args) {
-    pid_t pid;
-    int status;
 
-    pid = fork();
-    if (pid == 0) {
-        // Child process
-        if (setup_redirection(args) == -1) {
-            // Handle errors in redirection setup
-            exit(EXIT_FAILURE);  // Use EXIT_FAILURE for unsuccessful execution
+int single_command_execution(char **args){
+    
+}
+
+int launch(char **args) {
+    int pipefd[2];
+    pid_t pid1, pid2;
+    int pipeIndex = -1;
+
+    // Find the pipe in the arguments, if any
+    for (int i = 0; args[i] != NULL; i++) {
+        if (strcmp(args[i], "|") == 0) {
+            pipeIndex = i;
+            break;
         }
-        if (execvp(args[0], args) == -1) {
-            perror("mysh");
+    }
+
+    if (pipeIndex == -1) {
+        // No pipe found, handle as single command
+        return single_command_execution(args); // Implement this based on your existing code
+    } else {
+        // Pipe handling
+        if (pipe(pipefd) == -1) {
+            perror("pipe");
+            return -1;
+        }
+
+        // Split args into two parts
+        args[pipeIndex] = NULL; // Split the command into two parts at the pipe
+        char **args1 = args; // First part
+        char **args2 = &args[pipeIndex + 1]; // Second part
+
+        // Fork first process
+        if ((pid1 = fork()) == 0) {
+            // Child 1: executes command before the pipe
+            close(pipefd[0]); // Close unused read end
+            dup2(pipefd[1], STDOUT_FILENO); // Connect stdout to pipe write
+            close(pipefd[1]);
+            execvp(args1[0], args1); // Execute the command
             exit(EXIT_FAILURE);
         }
-    } else if (pid < 0) {
-        // Error forking
-        perror("mysh");
-    } else {
-        // Parent process
-        do {
-            waitpid(pid, &status, WUNTRACED);
-        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+
+        // Fork second process
+        if ((pid2 = fork()) == 0) {
+            // Child 2: executes command after the pipe
+            close(pipefd[1]); // Close unused write end
+            dup2(pipefd[0], STDIN_FILENO); // Connect stdin to pipe read
+            close(pipefd[0]);
+            execvp(args2[0], args2); // Execute the command
+            exit(EXIT_FAILURE);
+        }
+
+        // Parent closes both ends and waits for children
+        close(pipefd[0]);
+        close(pipefd[1]);
+        waitpid(pid1, NULL, 0);
+        waitpid(pid2, NULL, 0);
     }
 
     return 1;
 }
-
