@@ -8,6 +8,7 @@
 #include <fnmatch.h>
 #include <fcntl.h>
 #include <glob.h>
+#include <ctype.h>
 
 #define MAX_LINE 1024
 #define MAX_ARGS 128
@@ -26,6 +27,7 @@ int cd(char **args);
 int pwd(char **args);
 int mysh_which(char **args);
 int mysh_exit(char **args);
+int setup_redirection(char **args);
 
 // List of builtin commands, followed by their corresponding functions.
 char *builtin_str[] = {
@@ -53,7 +55,7 @@ void loop(void) {
     int status;
 
     do {
-        printf("> ");
+        //printf("> ");
         line = read_line();
         args = split_line(line);
         status = execute(args);
@@ -63,69 +65,148 @@ void loop(void) {
     } while (status);
 }
 
+
 char *read_line(void) {
     char *line = NULL;
     ssize_t bufsize = 0; // have getline allocate a buffer for us
-    getline(&line, &bufsize, stdin);
+    ssize_t linelen = getline(&line, &bufsize, stdin);
+
+    if (linelen == -1) {
+        if (feof(stdin)) {
+            fprintf(stderr, "End of file reached. Exiting.\n");
+            exit(EXIT_SUCCESS); // Graceful exit at EOF
+        } else {
+            perror("getline");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    fprintf(stderr, "Debug: read_line: %s", line); // Print the line read from stdin
     return line;
 }
 
 char **split_line(char *line) {
-    int bufsize = MAX_ARGS, position = 0;
+    int bufsize = MAX_ARGS;
+    int position = 0;
     char **tokens = malloc(bufsize * sizeof(char*));
     char *token;
+    int i = 0;
+    int start;
+    char current_char;
+    int in_quotes = 0; // False
 
     if (!tokens) {
-        fprintf(stderr, "mysh: allocation error\n");
+        fprintf(stderr, "allocation error\n");
         exit(EXIT_FAILURE);
     }
 
-    token = strtok(line, TOKEN_DELIM);
-    while (token != NULL) {
-        tokens[position] = token;
-        position++;
-
-        if (position >= bufsize) {
-            bufsize += MAX_ARGS;
-            tokens = realloc(tokens, bufsize * sizeof(char*));
-            if (!tokens) {
-                fprintf(stderr, "mysh: allocation error\n");
-                exit(EXIT_FAILURE);
-            }
+    while (line[i] != '\0') {
+        while (isspace(line[i])) i++; // Skip leading whitespace
+        start = i;
+        if (line[i] == '\"') { // Detect quote start
+            in_quotes = 1; // True
+            start++; // Move past the quote for the token start
+            i++; // Move to the next character after the quote
         }
 
-        token = strtok(NULL, TOKEN_DELIM);
+        while ((current_char = line[i]) != '\0' && (in_quotes || !isspace(current_char))) {
+            if (in_quotes && current_char == '\"') { // Detect matching quote end
+                in_quotes = 0; // False
+                break; // End token parsing
+            }
+            i++;
+        }
+
+        if (start != i) { // We have a token
+            token = strndup(line + start, i - start);
+            if (in_quotes) i++; // Skip past the closing quote
+            tokens[position++] = token;
+
+            if (position >= bufsize) {
+                bufsize += MAX_ARGS;
+                tokens = realloc(tokens, bufsize * sizeof(char*));
+                if (!tokens) {
+                    fprintf(stderr, "allocation error\n");
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+        i++; // Move past the space or quote
     }
-    tokens[position] = NULL;
+
+    tokens[position] = NULL; // Null-terminate the list of tokens
     return tokens;
 }
 
+
+
+// char **split_line(char *line) {
+//     int bufsize = MAX_ARGS, position = 0;
+//     char **tokens = malloc(bufsize * sizeof(char*));
+//     char *token;
+
+//     if (!tokens) {
+//         fprintf(stderr, "mysh: allocation error\n");
+//         exit(EXIT_FAILURE);
+//     }
+
+//     token = strtok(line, TOKEN_DELIM);
+//     while (token != NULL) {
+//         tokens[position] = token;
+//         position++;
+
+//         if (position >= bufsize) {
+//             bufsize += MAX_ARGS;
+//             tokens = realloc(tokens, bufsize * sizeof(char*));
+//             if (!tokens) {
+//                 fprintf(stderr, "mysh: allocation error\n");
+//                 exit(EXIT_FAILURE);
+//             }
+//         }
+
+//         token = strtok(NULL, TOKEN_DELIM);
+//     }
+//     tokens[position] = NULL;
+//     return tokens;
+// }
+
+
 int execute(char **args) {
+    if (args[0] == NULL || args[0][0] == '#' || strlen(args[0]) == 0) {
+        return 1;
+    }
     if (args[0] == NULL) {
-        // An empty command was entered.
+        fprintf(stderr, "Debug: execute: No command entered.\n");
         return 1;
     }
 
+    fprintf(stderr, "Debug: execute: Command: %s\n", args[0]); // Print the command to be executed
+
     for (int i = 0; i < num_builtins(); i++) {
         if (strcmp(args[0], builtin_str[i]) == 0) {
+            fprintf(stderr, "Debug: execute: Executing builtin: %s\n", args[0]); // Print the builtin being executed
             return (*builtin_func[i])(args);
         }
     }
 
-    return launch(args);
+    return launch(args); // External command execution
 }
 
 
 int cd(char **args) {
-    if (args[1] == NULL) {
-        fprintf(stderr, "mysh: expected argument to \"cd\"\n");
+    if (args[1] == NULL || strcmp(args[1], "~") == 0) {
+        char *home = getenv("HOME");
+        if (chdir(home) != 0) {
+            perror("cd");
+        }
     } else {
         if (chdir(args[1]) != 0) {
-            perror("mysh");
+            perror("cd");
         }
     }
     return 1;
 }
+
 
 int pwd(char **args) {
     char cwd[1024];
@@ -222,66 +303,67 @@ void expand_wildcards(char ***args) {
 
 #include <fcntl.h> // For file control options
 
-// This function sets up redirection in the shell.
-// It modifies file descriptors for the current process based on the command.
-// It should be called before executing the command.
-int setup_redirection(char **args) {
-    int inRedirect = -1, outRedirect = -1; // File descriptors for input and output redirection
-    char *inputFile = NULL, *outputFile = NULL;
-
+int needs_redirection(char **args) {
     for (int i = 0; args[i] != NULL; i++) {
-        if (strcmp(args[i], "<") == 0) { // Input redirection
-            inputFile = args[i + 1];
-            if (inputFile == NULL) {
-                fprintf(stderr, "mysh: expected file name after '<'\n");
-                return -1;
-            }
-            inRedirect = open(inputFile, O_RDONLY);
-            if (inRedirect < 0) {
-                perror("mysh: open input");
-                return -1;
-            }
-            args[i] = NULL; // Remove the redirection from arguments
-        } else if (strcmp(args[i], ">") == 0) { // Output redirection
-            outputFile = args[i + 1];
-            if (outputFile == NULL) {
-                fprintf(stderr, "mysh: expected file name after '>'\n");
-                return -1;
-            }
-            // Open file for writing, create if necessary, truncate to zero length.
-            outRedirect = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
-            if (outRedirect < 0) {
-                perror("mysh: open output");
-                return -1;
-            }
-            args[i] = NULL; // Remove the redirection from arguments
+        if (strcmp(args[i], "<") == 0 || strcmp(args[i], ">") == 0) {
+            return 1; // Redirection symbols found
         }
     }
-
-    // Apply the redirections to the process
-    if (inRedirect != -1) {
-        if (dup2(inRedirect, STDIN_FILENO) < 0) {
-            perror("mysh: dup2 input");
-            return -1;
-        }
-        close(inRedirect);
-    }
-    if (outRedirect != -1) {
-        if (dup2(outRedirect, STDOUT_FILENO) < 0) {
-            perror("mysh: dup2 output");
-            return -1;
-        }
-        close(outRedirect);
-    }
-
-    return 0; // Indicate success
+    return 0; // No redirection symbols found
 }
 
-int single_command_execution(char **args){
-    
+
+
+int single_command_execution(char **args) {
+    // First, handle any file redirections that might be present in the arguments
+    fprintf(stderr, "Debug: single_command_execution: Executing command: %s\n", args[0]);
+
+    // Example of conditional check before setup_redirection call
+    if (needs_redirection(args)) {
+        if (setup_redirection(args) != 0) {
+            // Handle error
+            return -1; // Indicating failure
+        }
+    }
+
+    // Check if the command is a built-in command
+    for (int i = 0; i < num_builtins(); i++) {
+        if (strcmp(args[0], builtin_str[i]) == 0) {
+            // Execute the built-in function and return its status
+            return (builtin_func[i])(args);
+        }
+    }
+
+    // If not a built-in command, proceed to launch the command as an external process
+    pid_t pid, wpid;
+    int status;
+
+    pid = fork();
+    if (pid == 0) {
+        // Child process
+        // Debug print to verify args before execvp call
+        for (int i = 0; args[i] != NULL; i++) {
+            fprintf(stderr, "Debug: Arg[%d]: %s\n", i, args[i]);
+        }
+        if (execvp(args[0], args) == -1) {
+            perror("mysh");
+        }
+        exit(EXIT_FAILURE); // Exec only returns if there is an error
+    } else if (pid < 0) {
+        // Error forking
+        perror("mysh");
+    } else {
+        // Parent process
+        do {
+            wpid = waitpid(pid, &status, WUNTRACED);
+        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+    }
+
+    return 1; // Indicate successful execution (in the context of the shell loop)
 }
 
 int launch(char **args) {
+    fprintf(stderr, "Debug: launch: Preparing to execute: %s\n", args[0]);
     int pipefd[2];
     pid_t pid1, pid2;
     int pipeIndex = -1;
@@ -309,8 +391,9 @@ int launch(char **args) {
         char **args1 = args; // First part
         char **args2 = &args[pipeIndex + 1]; // Second part
 
+        fprintf(stderr, "Debug: launch: Setting up a pipe between %s and %s\n", args1[0], args2[0]);
         // Fork first process
-        if ((pid1 = fork()) == 0) {
+        if ((pid1 = fork()) == 0){
             // Child 1: executes command before the pipe
             close(pipefd[0]); // Close unused read end
             dup2(pipefd[1], STDOUT_FILENO); // Connect stdout to pipe write
@@ -335,6 +418,63 @@ int launch(char **args) {
         waitpid(pid1, NULL, 0);
         waitpid(pid2, NULL, 0);
     }
-
     return 1;
+}
+
+int setup_redirection(char **args) {
+    fprintf(stderr, "Debug: setup_redirection: Setting up redirection\n");
+    int inRedirect = -1, outRedirect = -1;
+    char *inputFile = NULL, *outputFile = NULL;
+
+    for (int i = 0; args[i] != NULL; i++) {
+        if (strcmp(args[i], "<") == 0) {
+            inputFile = args[i + 1];
+            if (inputFile == NULL) {
+                fprintf(stderr, "mysh: expected file name after '<'\n");
+                return -1;
+            }
+            inRedirect = open(inputFile, O_RDONLY);
+            if (inRedirect < 0) {
+                perror("mysh: open input");
+                return -1;
+            }
+            args[i] = NULL; // Remove the '<' symbol from arguments
+            args[i + 1] = NULL; // Remove the filename from arguments
+            i++; // Skip next argument since it's been processed
+        } else if (strcmp(args[i], ">") == 0) {
+            outputFile = args[i + 1];
+            if (outputFile == NULL) {
+                fprintf(stderr, "mysh: expected file name after '>'\n");
+                return -1;
+            }
+            outRedirect = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+            if (outRedirect < 0) {
+                perror("mysh: open output");
+                return -1;
+            }
+            args[i] = NULL; // Remove the '>' symbol from arguments
+            args[i + 1] = NULL; // Also remove the filename from arguments
+            i++; // Skip next argument since it's been processed
+        }
+    }
+
+    // Apply the redirections to the process
+    if (inRedirect != -1) {
+        if (dup2(inRedirect, STDIN_FILENO) < 0) {
+            perror("mysh: dup2 input");
+            close(inRedirect);
+            return -1;
+        }
+        close(inRedirect);
+    }
+    if (outRedirect != -1) {
+        if (dup2(outRedirect, STDOUT_FILENO) < 0) {
+            perror("mysh: dup2 output");
+            close(outRedirect);
+            return -1;
+        }
+        close(outRedirect);
+    }
+
+    return 0; // Indicate success
 }
