@@ -84,193 +84,48 @@ char *read_line(void) {
         }
     }
 
-    fprintf(stderr, "Debug: read_line: %s", line); // Print the line read from stdin
+    //fprintf(stderr, "Debug: read_line: %s", line); // Print the line read from stdin
     return line;
 }
-
-// char **split_line(char *line) {
-//     int bufsize = MAX_ARGS;
-//     int position = 0;
-//     char **tokens = malloc(bufsize * sizeof(char*));
-//     char *token;
-//     int i = 0;
-//     int start;
-//     char current_char;
-//     int in_quotes = 0; // False
-
-//     if (!tokens) {
-//         fprintf(stderr, "allocation error\n");
-//         exit(EXIT_FAILURE);
-//     }
-
-//     while (line[i] != '\0') {
-//         while (isspace(line[i])) i++; // Skip leading whitespace
-//         start = i;
-//         if (line[i] == '\"') { // Detect quote start
-//             in_quotes = 1; // True
-//             start++; // Move past the quote for the token start
-//             i++; // Move to the next character after the quote
-//         }
-
-//         while ((current_char = line[i]) != '\0' && (in_quotes || !isspace(current_char))) {
-//             if (in_quotes && current_char == '\"') { // Detect matching quote end
-//                 in_quotes = 0; // False
-//                 break; // End token parsing
-//             }
-//             i++;
-//         }
-
-//         if (start != i) { // We have a token
-//             token = strndup(line + start, i - start);
-//             if (in_quotes) i++; // Skip past the closing quote
-//             tokens[position++] = token;
-
-//             if (position >= bufsize) {
-//                 bufsize += MAX_ARGS;
-//                 tokens = realloc(tokens, bufsize * sizeof(char*));
-//                 if (!tokens) {
-//                     fprintf(stderr, "allocation error\n");
-//                     exit(EXIT_FAILURE);
-//                 }
-//             }
-//         }
-//         i++; // Move past the space or quote
-//     }
-
-//     tokens[position] = NULL; // Null-terminate the list of tokens
-//     return tokens;
-// }
-
-/*char **split_line(char *line) {
-    int bufsize = MAX_ARGS, position = 0;
-    char **tokens = malloc(bufsize * sizeof(char*));
-    char *token, *end;
-    int i = 0;
-
-    if (!tokens) {
-        fprintf(stderr, "allocation error\n");
-        exit(EXIT_FAILURE);
-    }
-
-    while (line[i]) {
-        while (isspace(line[i])) i++;  // Skip whitespace
-        if (line[i] == '\"') {  // Start of a quoted token
-            i++;  // Skip the opening quote
-            end = strchr(line + i, '\"');  // Find the closing quote
-            if (end) {
-                token = strndup(line + i, end - (line + i));
-                i = (end - line) + 1;  // Move past the closing quote
-            } else {  // No closing quote found
-                fprintf(stderr, "Missing closing quote\n");
-                exit(EXIT_FAILURE);
-            }
-        } else {  // Start of an unquoted token
-            end = line + i;
-            while (*end && !isspace(*end)) end++;  // Find the end of the token
-            token = strndup(line + i, end - (line + i));
-            i = end - line;
-        }
-
-        tokens[position++] = token;
-        if (position >= bufsize) {
-            bufsize += MAX_ARGS;
-            tokens = realloc(tokens, bufsize * sizeof(char*));
-            if (!tokens) {
-                fprintf(stderr, "allocation error\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-        if (!*end) break;  // End of string
-    }
-
-    tokens[position] = NULL;  // Null-terminate the list of tokens
-    return tokens;
-}*/
 
 char **split_line(char *line) {
     int bufsize = MAX_ARGS, position = 0;
     char **tokens = malloc(bufsize * sizeof(char*));
-    char *token, *end;
-    int i = 0;
+    char *token;
+    const char *delim = " \t\r\n\a";
+    int start = 0, end = 0;
+    int in_quote = 0;
 
     if (!tokens) {
         fprintf(stderr, "allocation error\n");
         exit(EXIT_FAILURE);
     }
 
-    while (line[i]) {
-        while (isspace(line[i])) i++;  // Skip whitespace
-        if (line[i] == '\"') {  // Start of a quoted token
-            i++;  // Skip the opening quote
-            end = strchr(line + i, '\"');  // Find the closing quote
-            if (end) {
-                token = strndup(line + i, end - (line + i));
-                i = (end - line) + 1;  // Move past the closing quote
-            } else {  // No closing quote found
-                fprintf(stderr, "Missing closing quote\n");
-                exit(EXIT_FAILURE);
-            }
-        } else {  // Start of an unquoted token
-            end = line + i;
-            while (*end && !isspace(*end) && (strncmp(end, ">>", 2) != 0)) end++;  // Find the end of the token, but don't split on ">>"
-            token = strndup(line + i, end - (line + i));
-            i = end - line;
-            if (*end == '\0' || isspace(*end)) {
-                // Regular token, move past it
-            } else if (strncmp(end, ">>", 2) == 0) {
-                // Append redirection operator found
-                token = realloc(token, strlen(token) + 3);  // Reallocate to include ">>"
-                strcat(token, ">>");
-                i += 2;  // Move past ">>"
-            }
-        }
+    while (line[end] != '\0') {
+        if (line[end] == '\"') in_quote = !in_quote; // Toggle in_quote on encountering a quote
 
-        tokens[position++] = token;
-        if (position >= bufsize) {
-            bufsize += MAX_ARGS;
-            tokens = realloc(tokens, bufsize * sizeof(char*));
-            if (!tokens) {
-                fprintf(stderr, "allocation error\n");
-                exit(EXIT_FAILURE);
+        if ((isspace(line[end]) && !in_quote) || line[end+1] == '\0') {
+            if (line[end+1] == '\0' && !isspace(line[end])) end++; // Include last word
+            if (end - start > 0) { // We have a token
+                token = strndup(line + start, end - start);
+                tokens[position++] = token;
+                if (position >= bufsize) {
+                    bufsize += MAX_ARGS;
+                    tokens = realloc(tokens, bufsize * sizeof(char*));
+                    if (!tokens) {
+                        fprintf(stderr, "allocation error\n");
+                        exit(EXIT_FAILURE);
+                    }
+                }
             }
+            start = end + 1; // Move start to the next character after current whitespace
         }
-        if (!*end) break;  // End of string
+        end++;
     }
 
-    tokens[position] = NULL;  // Null-terminate the list of tokens
+    tokens[position] = NULL; // Null-terminate the list of tokens
     return tokens;
 }
-
-
-// char **split_line(char *line) {
-//     int bufsize = MAX_ARGS, position = 0;
-//     char **tokens = malloc(bufsize * sizeof(char*));
-//     char *token;
-
-//     if (!tokens) {
-//         fprintf(stderr, "mysh: allocation error\n");
-//         exit(EXIT_FAILURE);
-//     }
-
-//     token = strtok(line, TOKEN_DELIM);
-//     while (token != NULL) {
-//         tokens[position] = token;
-//         position++;
-
-//         if (position >= bufsize) {
-//             bufsize += MAX_ARGS;
-//             tokens = realloc(tokens, bufsize * sizeof(char*));
-//             if (!tokens) {
-//                 fprintf(stderr, "mysh: allocation error\n");
-//                 exit(EXIT_FAILURE);
-//             }
-//         }
-
-//         token = strtok(NULL, TOKEN_DELIM);
-//     }
-//     tokens[position] = NULL;
-//     return tokens;
-// }
 
 
 int execute(char **args) {
@@ -278,13 +133,13 @@ int execute(char **args) {
         return 1;
     }
     if (args[0] == NULL) {
-        fprintf(stderr, "Debug: execute: No command entered.\n");
+        //fprintf(stderr, "Debug: execute: No command entered.\n");
         return 1;
     }
 
     for (int i = 0; i < num_builtins(); i++) {
         if (strcmp(args[0], builtin_str[i]) == 0) {
-            fprintf(stderr, "Debug: execute: Executing builtin: %s\n", args[0]); // Print the builtin being executed
+            //fprintf(stderr, "Debug: execute: Executing builtin: %s\n", args[0]); // Print the builtin being executed
             return (*builtin_func[i])(args);
         }
     }
@@ -412,139 +267,9 @@ int needs_redirection(char **args) {
     return 0; // No redirection symbols found
 }
 
-/*int single_command_execution(char **args) {
-    // First, handle any file redirections that might be present in the arguments
-    fprintf(stderr, "Debug: single_command_execution: Executing command: %s\n", args[0]);
-
-    // Example of conditional check before setup_redirection call
-    if (needs_redirection(args)) {
-        if (setup_redirection(args) != 0) {
-            // Handle error
-            return -1; // Indicating failure
-        }
-    }
-
-    // Check if the command is a built-in command
-    for (int i = 0; i < num_builtins(); i++) {
-        if (strcmp(args[0], builtin_str[i]) == 0) {
-            // Execute the built-in function and return its status
-            return (builtin_func[i])(args);
-        }
-    }
-
-    // If not a built-in command, proceed to launch the command as an external process
-    pid_t pid, wpid;
-    int status;
-
-    pid = fork();
-    if (pid == 0) {
-        // Child process
-        // Debug print to verify args before execvp call
-        for (int i = 0; args[i] != NULL; i++) {
-            fprintf(stderr, "Debug: Arg[%d]: %s\n", i, args[i]);
-        }
-        if (execvp(args[0], args) == -1) {
-            perror("mysh");
-        }
-        exit(EXIT_FAILURE); // Exec only returns if there is an error
-    } else if (pid < 0) {
-        // Error forking
-        perror("mysh");
-    } else {
-        // Parent process
-        do {
-            wpid = waitpid(pid, &status, WUNTRACED);
-        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-    }
-
-    return 1; // Indicate successful execution (in the context of the shell loop)
-}
-
-int launch(char **args) {
-    fprintf(stderr, "Debug: launch: Preparing to execute: %s\n", args[0]);
-    int pipefd[2];
-    pid_t pid1, pid2;
-    int pipeIndex = -1;
-
-    // Find the pipe in the arguments, if any
-    for (int i = 0; args[i] != NULL; i++) {
-        if (strcmp(args[i], "|") == 0) {
-            pipeIndex = i;
-            break;
-        }
-    }
-
-    if (pipeIndex == -1) {
-        // No pipe found, handle as single command
-        return single_command_execution(args); // Implement this based on your existing code
-    } else {
-        // Pipe handling
-        if (pipe(pipefd) == -1) {
-            perror("pipe");
-            return -1;
-        }
-
-        // Split args into two parts
-        args[pipeIndex] = NULL; // Split the command into two parts at the pipe
-        char **args1 = args; // First part
-        char **args2 = &args[pipeIndex + 1]; // Second part
-
-        fprintf(stderr, "Debug: launch: Setting up a pipe between %s and %s\n", args1[0], args2[0]);
-        // Fork first process
-        if ((pid1 = fork()) == 0){
-            // Child 1: executes command before the pipe
-            close(pipefd[0]); // Close unused read end
-            dup2(pipefd[1], STDOUT_FILENO); // Connect stdout to pipe write
-            close(pipefd[1]);
-            execvp(args1[0], args1); // Execute the command
-            exit(EXIT_FAILURE);
-        }
-
-        // Fork second process
-        if ((pid2 = fork()) == 0) {
-            // Child 2: executes command after the pipe
-            close(pipefd[1]); // Close unused write end
-            dup2(pipefd[0], STDIN_FILENO); // Connect stdin to pipe read
-            close(pipefd[0]);
-            execvp(args2[0], args2); // Execute the command
-            exit(EXIT_FAILURE);
-        }
-
-        // Parent closes both ends and waits for children
-        close(pipefd[0]);
-        close(pipefd[1]);
-        waitpid(pid1, NULL, 0);
-        waitpid(pid2, NULL, 0);
-    }
-    return 1;
-}if (inputFile == NULL) {
-             fprintf(stderr, "mysh: expected file name after '<'\n");
-                return -1;
-             }
-*/
-
-
-void debug_fds() {
-    DIR *d;
-    struct dirent *dir;
-    d = opendir("/proc/self/fd");
-    if (d) {
-        printf("Open file descriptors:\n");
-        while ((dir = readdir(d)) != NULL) {
-            // Skip the current and parent directory entries
-            if (strcmp(dir->d_name, ".") != 0 && strcmp(dir->d_name, "..") != 0) {
-                printf("%s\n", dir->d_name);
-            }
-        }
-        closedir(d);
-    } else {
-        perror("Failed to open /proc/self/fd");
-    }
-}
-
 
 int setup_redirection(char **args) {
-    fprintf(stderr, "Debug: setup_redirection: Setting up redirection\n");
+    //fprintf(stderr, "Debug: setup_redirection: Setting up redirection\n");
     int original_stdin = dup(STDIN_FILENO);
     int original_stdout = dup(STDOUT_FILENO);
     int inRedirect = -1, outRedirect = -1;
@@ -628,90 +353,8 @@ int setup_redirection(char **args) {
     return 0; // Indicate success
 }
 
-/*int setup_redirection(char **args) {
-    fprintf(stderr, "Debug: setup_redirection: Setting up redirection\n");
-    
-    // Save original file descriptors
-    int original_stdin = dup(STDIN_FILENO);
-    int original_stdout = dup(STDOUT_FILENO);
-    int inRedirect = -1, outRedirect = -1;
-    char *inputFile = NULL, *outputFile = NULL;
-
-    for (int i = 0; args[i] != NULL; i++) {
-        if (strcmp(args[i], "<") == 0) {
-            inputFile = args[i + 1];
-            if (inputFile == NULL) {
-                fprintf(stderr, "mysh: expected file name after '<'\n");
-                return -1;
-            }
-            inRedirect = open(inputFile, O_RDONLY);
-            if (inRedirect < 0) {
-                perror("mysh: open input");
-                return -1;
-            }
-            args[i] = NULL;
-            args[i + 1] = NULL;
-            i++;
-        } else if (strcmp(args[i], ">") == 0) {
-            outputFile = args[i + 1];
-            if (outputFile == NULL) {
-                fprintf(stderr, "mysh: expected file name after '>'\n");
-                return -1;
-            }
-            outRedirect = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0640);
-            if (outRedirect < 0) {
-                perror("mysh: open output");
-                return -1;
-            }
-            args[i] = NULL;
-            args[i + 1] = NULL;
-            i++;
-        }
-    }
-
-    if (inRedirect != -1) {
-        if (dup2(inRedirect, STDIN_FILENO) < 0) {
-            perror("mysh: dup2 input");
-            close(inRedirect); // Ensure original fd is closed
-            return -1;
-        }
-        close(inRedirect); // Close the original fd
-    }
-
-    if (outRedirect != -1) {
-        if (dup2(outRedirect, STDOUT_FILENO) < 0) {
-            perror("mysh: dup2 output");
-            close(outRedirect); // Ensure original fd is closed
-            return -1;
-        }
-        close(outRedirect); // Close the original fd
-    }
-
-    // Code to execute in child process after fork() but before execvp()
-    // Close unnecessary file descriptors
-    
-    // if (inRedirect != -1) {
-    //     close(inRedirect); // Not strictly necessary since it's already closed above
-    // }
-    // if (outRedirect != -1) {
-    //     close(outRedirect); // Not strictly necessary since it's already closed above
-    // }
-    
-    // Restore original file descriptors
-    if (original_stdin != -1) {
-        dup2(original_stdin, STDIN_FILENO);
-        close(original_stdin);
-    }
-    if (original_stdout != -1) {
-        dup2(original_stdout, STDOUT_FILENO);
-        close(original_stdout);
-    }
-
-    return 0; // Indicate success
-}*/
-
 int launch(char **args) {
-    fprintf(stderr, "Debug: launch: Preparing to execute: %s\n", args[0]);
+    //fprintf(stderr, "Debug: launch: Preparing to execute: %s\n", args[0]);
     int pipefd[2];
     pid_t pid1, pid2;
     int pipeIndex = -1;
@@ -739,7 +382,7 @@ int launch(char **args) {
         char **args1 = args; // First part
         char **args2 = &args[pipeIndex + 1]; // Second part
 
-        fprintf(stderr, "Debug: launch: Setting up a pipe between %s and %s\n", args1[0], args2[0]);
+        //fprintf(stderr, "Debug: launch: Setting up a pipe between %s and %s\n", args1[0], args2[0]);
 
         // Fork first process
         if ((pid1 = fork()) == 0) {
@@ -789,7 +432,7 @@ int launch(char **args) {
 }
 
 int single_command_execution(char **args) {
-    fprintf(stderr, "Debug: single_command_execution: Executing command: %s\n", args[0]);
+    //fprintf(stderr, "Debug: single_command_execution: Executing command: %s\n", args[0]);
 
     pid_t pid, wpid;
     int status;
@@ -806,7 +449,7 @@ int single_command_execution(char **args) {
 
         // Debug print to verify args before execvp call
         for (int i = 0; args[i] != NULL; i++) {
-            fprintf(stderr, "Debug: Arg[%d]: %s\n", i, args[i]);
+            //fprintf(stderr, "Debug: Arg[%d]: %s\n", i, args[i]);
         }
 
         if (execvp(args[0], args) == -1) {
