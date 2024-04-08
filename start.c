@@ -421,11 +421,32 @@ int launch(char **args) {
     return 1;
 }
 
+
+void debug_fds() {
+    DIR *d;
+    struct dirent *dir;
+    d = opendir("/proc/self/fd");
+    if (d) {
+        printf("Open file descriptors:\n");
+        while ((dir = readdir(d)) != NULL) {
+            // Skip the current and parent directory entries
+            if (strcmp(dir->d_name, ".") != 0 && strcmp(dir->d_name, "..") != 0) {
+                printf("%s\n", dir->d_name);
+            }
+        }
+        closedir(d);
+    } else {
+        perror("Failed to open /proc/self/fd");
+    }
+}
+
+
 int setup_redirection(char **args) {
     fprintf(stderr, "Debug: setup_redirection: Setting up redirection\n");
     int inRedirect = -1, outRedirect = -1;
     char *inputFile = NULL, *outputFile = NULL;
 
+    debug_fds();
     for (int i = 0; args[i] != NULL; i++) {
         if (strcmp(args[i], "<") == 0) {
             inputFile = args[i + 1];
@@ -461,6 +482,7 @@ int setup_redirection(char **args) {
     // Apply the redirections to the process
     if (inRedirect != -1) {
         if (dup2(inRedirect, STDIN_FILENO) < 0) {
+            debug_fds();
             perror("mysh: dup2 input");
             close(inRedirect);
             return -1;
@@ -469,6 +491,7 @@ int setup_redirection(char **args) {
     }
     if (outRedirect != -1) {
         if (dup2(outRedirect, STDOUT_FILENO) < 0) {
+            debug_fds();
             perror("mysh: dup2 output");
             close(outRedirect);
             return -1;
@@ -478,3 +501,4 @@ int setup_redirection(char **args) {
 
     return 0; // Indicate success
 }
+
