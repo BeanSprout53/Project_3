@@ -70,8 +70,9 @@ void loop(void) {
 
 
 char *read_line(void) {
+    
     char *line = NULL;
-    ssize_t bufsize = 0; // have getline allocate a buffer for us
+    size_t bufsize = 0; // have getline allocate a buffer for us
     ssize_t linelen = getline(&line, &bufsize, stdin);
 
     if (linelen == -1) {
@@ -92,7 +93,7 @@ char **split_line(char *line) {
     int bufsize = MAX_ARGS, position = 0;
     char **tokens = malloc(bufsize * sizeof(char*));
     char *token;
-    const char *delim = " \t\r\n\a";
+    //const char *delim = " \t\r\n\a";
     int start = 0, end = 0;
     int in_quote = 0;
 
@@ -270,8 +271,8 @@ int needs_redirection(char **args) {
 
 int setup_redirection(char **args) {
     //fprintf(stderr, "Debug: setup_redirection: Setting up redirection\n");
-    int original_stdin = dup(STDIN_FILENO);
-    int original_stdout = dup(STDOUT_FILENO);
+    //int original_stdin = dup(STDIN_FILENO);
+    //int original_stdout = dup(STDOUT_FILENO);
     int inRedirect = -1, outRedirect = -1;
     char *inputFile = NULL, *outputFile = NULL;
 
@@ -434,7 +435,7 @@ int launch(char **args) {
 int single_command_execution(char **args) {
     //fprintf(stderr, "Debug: single_command_execution: Executing command: %s\n", args[0]);
 
-    pid_t pid, wpid;
+    pid_t pid,wpid;
     int status;
 
     pid = fork();
